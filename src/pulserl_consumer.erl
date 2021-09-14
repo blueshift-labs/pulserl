@@ -17,8 +17,8 @@
 -export([start_link/3]).
 %% Consumer API
 -export([close/1, close/2, create/3, get_partitioned_consumers/1]).
--export([ack/3, nack/2, negative_ack/2, receive_message/1, receive_messages/2, redeliver_unack_messages/1,
-         seek/2]).
+-export([ack/3, nack/2, negative_ack/2, receive_message/1, receive_messages/2,
+         redeliver_unack_messages/1, seek/2]).
 %% gen_server callbacks
 -export([code_change/3, handle_call/3, handle_cast/2, handle_info/2, init/1,
          terminate/2]).
@@ -46,8 +46,10 @@
 
 receive_message(Pid) ->
     case receive_messages(Pid, 1) of
-        [] -> false;
-        [Message] -> Message
+        [] ->
+            false;
+        [Message] ->
+            Message
     end.
 
 receive_messages(Pid, N) ->
@@ -291,7 +293,9 @@ handle_call({negative_acknowledge, #messageId{topic = TopicStr} = MsgId},
         _ ->
             {reply, ok, handle_negative_acknowledgement(MsgId, State)}
     end;
-handle_call({?RECEIVE_MESSAGE, _}, _From, #state{partition_count = PartitionCount} = State)
+handle_call({?RECEIVE_MESSAGE, _},
+            _From,
+            #state{partition_count = PartitionCount} = State)
     when PartitionCount > 0 ->
     %% This consumer is the partition parent.
     %% Redirect the client to all the consumers.
@@ -304,7 +308,7 @@ handle_call({?RECEIVE_MESSAGE, _}, _From, #state{partition_count = PartitionCoun
         end,
     {reply, Replay, State3};
 handle_call({?RECEIVE_MESSAGE, Count}, _From, #state{} = State) ->
-    {Reply, State2} = handle_receive_message(State, Count),
+    {Reply, State2} = handle_receive_messages(State, Count),
     {reply, Reply, State2};
 handle_call({seek, Target}, _From, #state{parent_consumer = Parent} = State) ->
     Res = if not is_pid(Parent) ->
@@ -518,16 +522,14 @@ redirect_to_the_child_partition(#messageId{partition = Partition}, State) ->
 
 handle_negative_acknowledgement(#messageId{} = MsgId,
                                 #state{topic = Topic,
-                                    consumer_subscription_name = SubscriptionName,
-                                    nack_message_redelivery_delay = NegAckDelay,
+                                       consumer_subscription_name = SubscriptionName,
+                                       nack_message_redelivery_delay = NegAckDelay,
                                        nack_message_redelivery_timer = NegAckTimer,
                                        nack_messages_to_redeliver = NegAckMessages} =
                                     State) ->
-                                        telemetry:execute(
-                                            [pulserl, nack],
-                                            #{count => 1},
-                                            #{topic => Topic, subscription => SubscriptionName}
-                                          ),                                    
+    telemetry:execute([pulserl, nack],
+                      #{count => 1},
+                      #{topic => Topic, subscription => SubscriptionName}),
     NegAckMsg = {erlwater_time:milliseconds() + NegAckDelay, MsgId},
     State2 = State#state{nack_messages_to_redeliver = [NegAckMsg | NegAckMessages]},
     State3 = untrack_message(MsgId, false, State2),
@@ -537,7 +539,9 @@ handle_negative_acknowledgement(#messageId{} = MsgId,
            State3
     end.
 
-redeliver_ack_timeout_messages(#state{topic = Topic, consumer_subscription_name = SubscriptionName}=State) ->
+redeliver_ack_timeout_messages(#state{topic = Topic,
+                                      consumer_subscription_name = SubscriptionName} =
+                                   State) ->
     NowMillis = erlwater_time:milliseconds(),
     UnAckMessageIds = State#state.un_ack_message_ids,
     {MessagesToRedeliver2, RestOfUnAckMessageIds} =
@@ -553,11 +557,9 @@ redeliver_ack_timeout_messages(#state{topic = Topic, consumer_subscription_name 
     State2 = State#state{un_ack_message_ids = RestOfUnAckMessageIds},
     State3 =
         if MessagesToRedeliver2 /= [] ->
-            telemetry:execute(
-                [pulserl, ack, timeout],
-                #{count => length(MessagesToRedeliver2)},
-                #{topic => Topic, subscription => SubscriptionName}
-              ),
+               telemetry:execute([pulserl, ack, timeout],
+                                 #{count => length(MessagesToRedeliver2)},
+                                 #{topic => Topic, subscription => SubscriptionName}),
                error_logger:info_msg("~p messages timed-out from consumer=[~s, "
                                      "~p]",
                                      [length(MessagesToRedeliver2),
@@ -581,7 +583,11 @@ redeliver_nack_messages(State) ->
 redeliver_messages([], State) ->
     State;
 redeliver_messages(MessageIds,
-                   #state{connection = Cnx, consumer_id = ConsumerId, topic = Topic, consumer_subscription_name = SubscriptionName} = State) ->
+                   #state{connection = Cnx,
+                          consumer_id = ConsumerId,
+                          topic = Topic,
+                          consumer_subscription_name = SubscriptionName} =
+                       State) ->
     Command =
         case State#state.consumer_subscription_type of
             ?SHARED_SUBSCRIPTION ->
@@ -593,20 +599,16 @@ redeliver_messages(MessageIds,
         end,
     case pulserl_conn:send_simple_command(Cnx, Command) of
         {error, _} = Error ->
-            telemetry:execute(
-                [pulserl, redelivery, error],
-                #{count => length(MessageIds)},
-                #{topic => Topic, subscription => SubscriptionName}
-              ),
+            telemetry:execute([pulserl, redelivery, error],
+                              #{count => length(MessageIds)},
+                              #{topic => Topic, subscription => SubscriptionName}),
             error_logger:error_msg("Error: ~p on sending redeliver messages "
                                    "command",
                                    [Error]);
         _ ->
-            telemetry:execute(
-                [pulserl, redelivery],
-                #{count => length(MessageIds)},
-                #{topic => Topic, subscription => SubscriptionName}
-              ),
+            telemetry:execute([pulserl, redelivery],
+                              #{count => length(MessageIds)},
+                              #{topic => Topic, subscription => SubscriptionName}),
             ok
     end,
     State.
@@ -726,8 +728,9 @@ message_id_2_batch_ack_tracker_key(#messageId{ledger_id = LedgerId,
                                               entry_id = EntryId}) ->
     {LedgerId, EntryId}.
 
-handle_receive_message(#state{incoming_messages = MessageQueue} = State, Count) ->
-    {MessageQueue2, Acc, SoFar, State2} = get_messages_from_queue(MessageQueue, Count, [], 0, State),
+handle_receive_messages(#state{incoming_messages = MessageQueue} = State, Count) ->
+    {MessageQueue2, Acc, SoFar, State2} =
+        get_messages_from_queue(MessageQueue, Count, [], 0, State),
     State3 = increase_flow_permits(State2#state{incoming_messages = MessageQueue2}, SoFar),
     {lists:reverse(Acc), State3}.
 
@@ -824,9 +827,8 @@ send_message_to_dead_letter_topic3(Message,
 do_send_to_dead_letter_topic(Message,
                              #state{dead_letter_topic_name = DLQ,
                                     dead_letter_topic_producer = ProducerPid,
-                                topic = Topic, 
-                            consumer_subscription_name = SubscriptionName
-                                } =
+                                    topic = Topic,
+                                    consumer_subscription_name = SubscriptionName} =
                                  State) ->
     if is_pid(ProducerPid) ->
            do_send_to_dead_letter_topic1(Message, State);
@@ -839,11 +841,11 @@ do_send_to_dead_letter_topic(Message,
                    State2 = State#state{dead_letter_topic_producer = Pid},
                    do_send_to_dead_letter_topic1(Message, State2);
                {error, Reason} ->
-                telemetry:execute(
-                    [pulserl, dlq, error],
-                    #{count => 1},
-                    #{topic => Topic, subscription => SubscriptionName, dlq => DLQ}
-                  ),
+                   telemetry:execute([pulserl, dlq, error],
+                                     #{count => 1},
+                                     #{topic => Topic,
+                                       subscription => SubscriptionName,
+                                       dlq => DLQ}),
                    error_logger:error_msg("Error creating dead letter topic=~s "
                                           "from consumer=[~s, ~p]. Reason: ~p",
                                           [DLQ,
@@ -866,11 +868,11 @@ do_send_to_dead_letter_topic1(Message, State) ->
                      ordering_key = OrderingKey,
                      event_time = EventTime} =
         Message,
-        telemetry:execute(
-            [pulserl, dlq, send],
-            #{count => 1},
-            #{topic => Topic, subscription => SubscriptionName, dlq => DeadLetterTopic}
-          ),
+    telemetry:execute([pulserl, dlq, send],
+                      #{count => 1},
+                      #{topic => Topic,
+                        subscription => SubscriptionName,
+                        dlq => DeadLetterTopic}),
     error_logger:warning_msg("Giving up processsing of message {legderId=~p"
                              ", entryId=~p, redliveryCount=~p, topic=~s} "
                              "by sending it to the dead letter topic=~s "
@@ -892,11 +894,11 @@ do_send_to_dead_letter_topic1(Message, State) ->
                                       {properties, Properties}]),
     case pulserl_producer:sync_send(ProducerPid, ProdMessage, 15000) of
         {error, Reason} = Result ->
-            telemetry:execute(
-                [pulserl, dlq, error],
-                #{count => 1},
-                #{topic => Topic, subscription => SubscriptionName, dlq => DeadLetterTopic}
-              ),
+            telemetry:execute([pulserl, dlq, error],
+                              #{count => 1},
+                              #{topic => Topic,
+                                subscription => SubscriptionName,
+                                dlq => DeadLetterTopic}),
             error_logger:error_msg("Error sending to dead letter topic=~s "
                                    "from consumer=[~s, ~p]. Reason: ~p",
                                    [DeadLetterTopic,

@@ -16,7 +16,7 @@
 -export([start_consumer/2, start_consumer/3]).
 -export([start_producer/1, start_producer/2]).
 -export([produce/2, produce/3, produce/4, sync_produce/2, sync_produce/3]).
--export([ack/1, ack/2, c_ack/1, c_ack/2, consume/2, nack/1, nack/2]).
+-export([ack/1, ack/2, c_ack/1, c_ack/2, consume/2, consume/3, nack/1, nack/2]).
 -export([ack_cumulative/1, ack_cumulative/2, negative_ack/1, negative_ack/2]).
 %% Expose for demo purposes
 -export([start_consumption_in_background/2]).
@@ -156,22 +156,30 @@ sync_produce(PidOrTopic, #producerMessage{} = Msg, Timeout)
            end
     end.
 
+consume(PidOrTopic, Subscription) ->
+    case consume(PidOrTopic, Subscription, 1) of
+        [Message] ->
+            Message;
+        Other ->
+            Other
+    end.
+
 %%-------------------------------------------------------------------------------
-%% @doc consume a message from the consumer of the specified topic.
+%% @doc consume messages from the consumer of the specified topic.
 %% If `PidOrTopic` is a topic, a registry lookup is done to fine an already existing
 %% consumer created for the specified topic; if none is found, one is created and
 %% register for future calls
 %%-------------------------------------------------------------------------------
-consume(PidOrTopic, Subscription) ->
+consume(PidOrTopic, Subscription, Count) ->
     if is_pid(PidOrTopic) ->
-           pulserl_consumer:receive_message(PidOrTopic);
+           pulserl_consumer:receive_messages(PidOrTopic, Count);
        true ->
            case pulserl_instance_registry:get_consumer(PidOrTopic,
                                                        Subscription,
                                                        pulserl_app:def_consumer_options())
            of
                {ok, Pid} ->
-                   consume(Pid, Subscription);
+                   consume(Pid, Subscription, Count);
                Other ->
                    Other
            end

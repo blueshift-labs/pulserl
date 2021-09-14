@@ -14,7 +14,7 @@ to interact with the Pulsar brokers and exposes a very simple API.
 
 The examples assume you have a running Pulsar broker at `localhost:6650`, a topic called `test-topic` (can be partitioned or not) and `rebar3` installed.
 
-_Note: Pulserl uses `pulserl` and `Shared` as the default subscription name and type.
+_Note: Pulserl uses `Shared` as the default subscription type.
  So, if that subscription (not the consumer) under the topic `test-topic` does not exists, we make sure in this example to create it first by creating
  the consumer before producing any message to the topic._
 
@@ -31,7 +31,7 @@ In the Erlang shell
 
   %% A demo function to log the value of consumed messages
   %% that will be produced blow.
-  pulserl:start_consumption_in_background("test-topic").
+  pulserl:start_consumption_in_background("test-topic", "subscription").
 
   %% Asycnhrounous produce
   Promise = pulserl:produce("test-topic", "Asycn produce message").
@@ -232,13 +232,13 @@ pulserl:sync_produce(Topic, Message).
 
 ### Consumer
 
-Similar to producer `pulserl:start_consumer/1,2` starts a "parent" `gen_server` under the `pulserl_consumer_sup`
+Similar to producer `pulserl:start_consumer/2,3` starts a "parent" `gen_server` under the `pulserl_consumer_sup`
 which in turn `start_link` and manage `n` child consumers per partition, parent consumer serves as a facade to the internal consumers.
 The parent monitor the child processes (internal partitioned consumers) for resilience.
 
 #### Starting a consumer
-Start a consumer with `pulserl:start_consumer/1,2` by passing a topic name and list of options.
-If `start_consumer/1` is used, the consumer will be started with a default options which can be provided in `sys.config` using the `consumer_opts` environment variable.
+Start a consumer with `pulserl:start_consumer/2,3` by passing a topic name and list of options.
+If `start_consumer/2` is used, the consumer will be started with a default options which can be provided in `sys.config` using the `consumer_opts` environment variable.
 
 ```erlang
 [
@@ -259,28 +259,28 @@ A sample start consumer API code:
     {dead_letter_topic_max_redeliver_count, 100} %% Default is 0 (disabled)
   ],
 
-  {ok, Pid1} = pulserl:start_consumer("topic-name"), %% Will use default option values
-  {ok, Pid2} = pulserl:start_consumer("persistent://public/default/topic-name", ConsumerOpts),
+  {ok, Pid1} = pulserl:start_consumer("topic-name", "subscription"), %% Will use default option values
+  {ok, Pid2} = pulserl:start_consumer("persistent://public/default/topic-name", "subscription", ConsumerOpts),
 
 ```
 
 On the start, every consumer process automatically sends [subscription command](https://pulsar.apache.org/docs/en/2.6.0/develop-binary-protocol/#consumer) to the broker, with [shared](https://pulsar.apache.org/docs/en/2.6.0/concepts-messaging/#shared) subscription type as default.
 After subscribtion command consumers sends the [flow command](https://pulsar.apache.org/docs/en/2.6.0/develop-binary-protocol/#flow-control) with the value of the consumer's message queue(`not Erlang process's`) len. At every point, the number of messages in the queue is <= `queue_size` and are readily available for upstream consumption. The consumer will resend a new flow permits every time the queue's size reaches the specified `queue_refill_threshold` (default to 50% of `queue_size`).
-To receive a message `pulserl:consume/1` should be used in a loop, for example:
+To receive a message `pulserl:consume/2` or `pulserl:consume/3` should be used in a loop, for example:
 
 ```erlang
-receive_message(PidOrTopic) ->
-  case pulserl:consume(PidOrTopic) of
+receive_message(PidOrTopic, Subscription) ->
+  case pulserl:consume(PidOrTopic, Subscription) of
     #consMessage{} = ConsumerMsg ->
       pulserl:ack(ConsumerMsg),
       ConsumerMsg;
     {error, _} = Error ->
       error(Error);
     _ ->
-      receive_message(Pid)
+      receive_message(Pid, Subscription)
   end.
 ```
-where `PidOrTopic` is a pid of parent consumer process returned by `pulserl:start_consumer/1,2` or a topic name.
+where `PidOrTopic` is a pid of parent consumer process returned by `pulserl:start_consumer/2,3` or a topic name.
 
 Each received message should be [acknowledged](https://pulsar.apache.org/docs/en/concepts-messaging/#acknowledgement) with `pulserl:ack/1,2`.
 `pulsar:nack/1,2` could be used to ask the broker for [redelivering of the message](https://pulsar.apache.org/docs/en/concepts-messaging/#negative-acknowledgement), but it should be send before [acknowledgement timeout](https://pulsar.apache.org/docs/en/concepts-messaging/#acknowledgement-timeout) which is disabled by default.

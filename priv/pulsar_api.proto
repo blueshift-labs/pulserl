@@ -16,9 +16,6 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-
-// Taken from Apache Pulsar 2.8.0
-
 syntax = "proto2";
 
 package pulsar.proto;

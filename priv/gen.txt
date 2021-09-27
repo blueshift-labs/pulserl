@@ -1,1 +1,3 @@
+# generate pulsar protobuf for v2.8.1
+
 gpb_compile:file("pulsar_api.proto", [{i, "priv"}, {o_erl, "src"}, {o_hrl, "include"}]).

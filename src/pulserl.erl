@@ -251,7 +251,7 @@ do_consume(PidOrTopic, Subscription) ->
             error(?ERROR_CLIENT_NOT_STARTED);
         {error, Reason} ->
             error_logger:error_msg("Consumer Error. Reason = ~p", [Reason]);
-        false ->
+        [] ->
             timer:sleep(10),
             ok
     end,
